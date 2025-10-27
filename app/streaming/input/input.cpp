@@ -34,6 +34,10 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
       m_DragButton(0),
       m_NumFingersDown(0)
 {
+    // Initialize Right-Ctrl toggle capture tracking
+    m_RightCtrlPressTime = 0;
+    m_RightCtrlUsedWithOtherKey = false;
+    m_LastUngrabTime = 0;
     // System keys are always captured when running without a DE
     if (!WMUtils::isRunningDesktopEnvironment()) {
         m_CaptureSystemKeysMode = StreamingPreferences::CSK_ALWAYS;

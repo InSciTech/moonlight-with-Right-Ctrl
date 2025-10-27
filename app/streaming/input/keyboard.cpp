@@ -170,6 +170,66 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         return;
     }
 
+// --- Right-Ctrl single-press toggle capture implementation ---
+    // This must come BEFORE the special combo check to track Right-Ctrl state properly
+
+    // Track Right-Ctrl press: record timestamp and reset combination flag
+    if (event->keysym.scancode == SDL_SCANCODE_RCTRL && event->state == SDL_PRESSED) {
+        m_RightCtrlPressTime = SDL_GetTicks();
+        m_RightCtrlUsedWithOtherKey = false;
+        // Don't return - let the key be sent to remote desktop normally
+    }
+
+    // Track if Right-Ctrl is being used in combination with other keys
+    // If Right-Ctrl is currently pressed and ANY other key event occurs, mark it as "used with other key"
+    if (m_RightCtrlPressTime > 0 && event->keysym.scancode != SDL_SCANCODE_RCTRL) {
+        m_RightCtrlUsedWithOtherKey = true;
+    }
+
+    // Handle Right-Ctrl release: check if it should toggle capture
+    if (event->keysym.scancode == SDL_SCANCODE_RCTRL && event->state == SDL_RELEASED) {
+        unsigned int now = SDL_GetTicks();
+        unsigned int pressDuration = now - m_RightCtrlPressTime;
+
+        // Determine if this was a "quick tap" meant to toggle capture:
+        // 1. Right-Ctrl was pressed (m_RightCtrlPressTime > 0)
+        // 2. It wasn't used with other keys (m_RightCtrlUsedWithOtherKey == false)
+        // 3. Press duration was short (< 300ms for a quick tap)
+        // 4. Enough time has passed since last toggle (debounce)
+        // 5. The ungrab combo is enabled in settings
+        bool shouldToggleCapture =
+            m_RightCtrlPressTime > 0 &&
+            !m_RightCtrlUsedWithOtherKey &&
+            pressDuration < RIGHT_CTRL_TOGGLE_MAX_DURATION_MS &&
+            (now - m_LastUngrabTime) > RIGHT_CTRL_TOGGLE_DEBOUNCE_MS &&
+            m_SpecialKeyCombos[KeyComboUngrabInput].enabled;
+
+        // Reset the tracking state
+        m_RightCtrlPressTime = 0;
+        m_RightCtrlUsedWithOtherKey = false;
+
+        if (shouldToggleCapture) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                       "Right-Ctrl quick tap detected - toggling input capture");
+
+            m_LastUngrabTime = now;
+
+            // We need to ensure the remote desktop knows Right-Ctrl is released
+            // Send the key-up event BEFORE toggling capture to maintain keyboard state consistency
+            short keyCode = 0xA3;  // VK_RCONTROL
+            char modifiers = 0;    // No modifiers for the release event itself
+            LiSendKeyboardEvent2(0x8000 | keyCode, KEY_ACTION_UP, modifiers, 0);
+
+            // Now toggle the capture mode
+            performSpecialKeyCombo(KeyComboUngrabInput);
+
+            // Return here to prevent sending the key event again below
+            return;
+        }
+
+        // If we didn't toggle, fall through to send the key event normally
+    }
+
     // Check for our special key combos
     if ((event->state == SDL_PRESSED) &&
             (event->keysym.mod & KMOD_CTRL) &&

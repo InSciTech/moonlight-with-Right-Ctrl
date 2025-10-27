@@ -213,6 +213,14 @@ private:
     bool m_PendingMouseButtonsAllUpOnVideoRegionLeave;
     bool m_PointerRegionLockActive;
     bool m_PointerRegionLockToggledByUser;
+// Right-Ctrl toggle capture state tracking
+    unsigned int m_RightCtrlPressTime;
+    bool m_RightCtrlUsedWithOtherKey;
+    unsigned int m_LastUngrabTime;
+
+    static const unsigned int RIGHT_CTRL_TOGGLE_MAX_DURATION_MS = 300;
+    static const unsigned int RIGHT_CTRL_TOGGLE_DEBOUNCE_MS = 500;
+
 
     int m_GamepadMask;
     GamepadState m_GamepadState[MAX_GAMEPADS];
