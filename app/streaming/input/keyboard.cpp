@@ -170,6 +170,85 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         return;
     }
 
+// ==================== Right-Ctrl keyboard capture toggle implementation ====================
+    // This section handles the Right-Ctrl quick-tap gesture to toggle keyboard capture.
+    // Mouse capture remains always active, only keyboard events are affected by this toggle.
+    
+    // Step 1: When Right-Ctrl is pressed down, record the timestamp and reset the combination flag
+    if (event->keysym.scancode == SDL_SCANCODE_RCTRL && event->state == SDL_PRESSED) {
+        m_RightCtrlPressTime = SDL_GetTicks();
+        m_RightCtrlUsedWithOtherKey = false;
+        // Don't return here - let the key event continue to be processed normally
+    }
+    
+    // Step 2: Track if Right-Ctrl is being used as a modifier key with other keys
+    // If Right-Ctrl is currently held down and ANY other key event occurs, mark it as "used with combo"
+    if (m_RightCtrlPressTime > 0 && event->keysym.scancode != SDL_SCANCODE_RCTRL) {
+        m_RightCtrlUsedWithOtherKey = true;
+    }
+    
+    // Step 3: When Right-Ctrl is released, check if this was a quick solo tap meant to toggle capture
+    if (event->keysym.scancode == SDL_SCANCODE_RCTRL && event->state == SDL_RELEASED) {
+        unsigned int now = SDL_GetTicks();
+        unsigned int pressDuration = now - m_RightCtrlPressTime;
+        
+        // Determine if this qualifies as a toggle gesture based on multiple conditions:
+        // 1. Right-Ctrl was actually pressed (timestamp is non-zero)
+        // 2. It wasn't used with other keys (wasn't acting as a modifier)
+        // 3. The press duration was short (quick tap, not a long hold)
+        // 4. Enough time has passed since the last toggle (debouncing)
+        // 5. The ungrab combo feature is enabled in settings
+        bool shouldToggleCapture = 
+            m_RightCtrlPressTime > 0 &&
+            !m_RightCtrlUsedWithOtherKey &&
+            pressDuration < RIGHT_CTRL_TOGGLE_MAX_DURATION_MS &&
+            (now - m_LastUngrabTime) > RIGHT_CTRL_TOGGLE_DEBOUNCE_MS &&
+            m_SpecialKeyCombos[KeyComboUngrabInput].enabled;
+        
+        // Always reset the tracking state when Right-Ctrl is released
+        m_RightCtrlPressTime = 0;
+        m_RightCtrlUsedWithOtherKey = false;
+        
+        if (shouldToggleCapture) {
+            SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                       "Right-Ctrl quick tap detected - toggling keyboard capture");
+            
+            m_LastUngrabTime = now;
+            
+            // Toggle the keyboard capture state (this does NOT affect mouse capture)
+            m_KeyboardCaptureActive = !m_KeyboardCaptureActive;
+            
+            if (m_KeyboardCaptureActive) {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                           "Keyboard capture ENABLED - keyboard input will be sent to remote desktop");
+            } else {
+                SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                           "Keyboard capture DISABLED - keyboard input will work locally (mouse still active on remote)");
+                
+                // When disabling keyboard capture, release all currently pressed keys on the remote side
+                // to avoid keys getting stuck in the pressed state on the remote desktop
+                raiseAllKeys();
+            }
+            // Update the keyboard grab state to match our new capture state
+            // This ensures that when keyboard capture is disabled, the OS can handle keyboard events normally
+            updateKeyboardOnlyGrabState();
+            
+            // Send the Right-Ctrl key-up event to the remote to maintain consistent keyboard state
+            // This is important because the key-down event was already sent earlier
+            short keyCode = 0xA3;  // Windows virtual key code for Right-Control
+            char modifiers = 0;    // No modifier flags for this synthetic release event
+            LiSendKeyboardEvent2(0x8000 | keyCode, KEY_ACTION_UP, modifiers, 0);
+            
+            // Return here to prevent the normal key event processing below from sending
+            // a duplicate key-up event for Right-Ctrl
+            return;
+        }
+        
+        // If we didn't toggle capture, fall through to let the key event be processed normally
+    }
+    // ==================== End of Right-Ctrl toggle implementation ====================
+
+
     // Check for our special key combos
     if ((event->state == SDL_PRESSED) &&
             (event->keysym.mod & KMOD_CTRL) &&
@@ -454,6 +533,14 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
     else {
         m_KeysDown.remove(keyCode);
     }
+
+    // Check if keyboard capture is active before sending the event to remote desktop
+    // When keyboard capture is disabled, keys work locally and are not sent to remote
+    // Note: This does not affect mouse events, which continue to work on the remote desktop
+    if (!m_KeyboardCaptureActive) {
+        return;
+    }
+
 
     LiSendKeyboardEvent2(0x8000 | keyCode,
                         event->state == SDL_PRESSED ?

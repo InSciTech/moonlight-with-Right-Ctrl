@@ -34,6 +34,12 @@ SdlInputHandler::SdlInputHandler(StreamingPreferences& prefs, int streamWidth, i
       m_DragButton(0),
       m_NumFingersDown(0)
 {
+    // Initialize Right-Ctrl toggle for keyboard capture tracking
+    m_RightCtrlPressTime = 0;
+    m_RightCtrlUsedWithOtherKey = false;
+    m_LastUngrabTime = 0;
+    m_KeyboardCaptureActive = true;
+
     // System keys are always captured when running without a DE
     if (!WMUtils::isRunningDesktopEnvironment()) {
         m_CaptureSystemKeysMode = StreamingPreferences::CSK_ALWAYS;
@@ -352,6 +358,43 @@ void SdlInputHandler::updateKeyboardGrabState()
 #endif
 }
 
+void SdlInputHandler::updateKeyboardOnlyGrabState()
+{
+    // This function updates keyboard grab state based on m_KeyboardCaptureActive
+    // without affecting mouse capture state
+    
+    if (m_CaptureSystemKeysMode == StreamingPreferences::CSK_OFF) {
+        // If system key capture is disabled in settings, never grab keyboard
+        SDL_SetHint(SDL_HINT_WINDOWS_NO_CLOSE_ON_ALT_F4, "0");
+#if SDL_VERSION_ATLEAST(2, 0, 15)
+        SDL_SetWindowKeyboardGrab(m_Window, SDL_FALSE);
+#endif
+        return;
+    }
+
+    // Determine if we should grab the keyboard based on our keyboard capture flag
+    // We also need to check if the overall capture is active (for mouse)
+    bool shouldGrab = m_KeyboardCaptureActive && isCaptureActive();
+    
+    Uint32 windowFlags = SDL_GetWindowFlags(m_Window);
+    if (m_CaptureSystemKeysMode == StreamingPreferences::CSK_FULLSCREEN &&
+            !(windowFlags & SDL_WINDOW_FULLSCREEN)) {
+        // If system key capture is set to fullscreen-only mode and we're not fullscreen,
+        // don't grab keyboard regardless of capture state
+        shouldGrab = false;
+    }
+
+    // Prevent Alt+F4 from closing the window when keyboard is grabbed
+    SDL_SetHint(SDL_HINT_WINDOWS_NO_CLOSE_ON_ALT_F4, shouldGrab ? "1" : "0");
+
+#if SDL_VERSION_ATLEAST(2, 0, 15)
+    // On SDL 2.0.15 and later, we can grab keyboard independently from mouse
+    // This is supported on Win32, X11, Wayland, and macOS (with non-AppStore build)
+    SDL_SetWindowKeyboardGrab(m_Window, shouldGrab ? SDL_TRUE : SDL_FALSE);
+#endif
+}
+
+
 bool SdlInputHandler::isSystemKeyCaptureActive()
 {
     if (m_CaptureSystemKeysMode == StreamingPreferences::CSK_OFF) {
@@ -432,8 +475,9 @@ void SdlInputHandler::setCaptureActive(bool active)
     // Update mouse pointer region constraints
     updatePointerRegionLock();
 
-    // Now update the keyboard grab
-    updateKeyboardGrabState();
+    // Now update the keyboard grab (using our keyboard-only version)
+    updateKeyboardOnlyGrabState();
+
 }
 
 void SdlInputHandler::handleTouchFingerEvent(SDL_TouchFingerEvent* event)
