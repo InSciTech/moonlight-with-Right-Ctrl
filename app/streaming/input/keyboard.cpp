@@ -221,6 +221,17 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
             if (m_KeyboardCaptureActive) {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                            "Keyboard capture ENABLED - keyboard input will be sent to remote desktop");
+                
+                // When re-enabling keyboard capture, restore the cursor visibility to the captured state
+                // This mimics the behavior of the original capture toggle
+                if (m_AbsoluteMouseMode) {
+                    // In absolute mouse mode, use the configured visibility state for captured mode
+                    SDL_ShowCursor(m_MouseCursorCapturedVisibilityState);
+                } else {
+                    // In relative mouse mode, the cursor is typically hidden
+                    // SDL_SetRelativeMouseMode already handles this, but we ensure consistency
+                    SDL_ShowCursor(SDL_DISABLE);
+                }
             } else {
                 SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
                            "Keyboard capture DISABLED - keyboard input will work locally (mouse still active on remote)");
@@ -228,7 +239,12 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
                 // When disabling keyboard capture, release all currently pressed keys on the remote side
                 // to avoid keys getting stuck in the pressed state on the remote desktop
                 raiseAllKeys();
+                
+                // Show the system cursor to provide visual feedback that keyboard capture is disabled
+                // This mimics the behavior when full capture is released
+                SDL_ShowCursor(SDL_ENABLE);
             }
+            
             // Update the keyboard grab state to match our new capture state
             // This ensures that when keyboard capture is disabled, the OS can handle keyboard events normally
             updateKeyboardOnlyGrabState();
