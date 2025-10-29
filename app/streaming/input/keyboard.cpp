@@ -534,12 +534,6 @@ void SdlInputHandler::handleKeyEvent(SDL_KeyboardEvent* event)
         m_KeysDown.remove(keyCode);
     }
 
-    // Check if keyboard capture is active before sending the event to remote desktop
-    // When keyboard capture is disabled, keys work locally and are not sent to remote
-    // Note: This does not affect mouse events, which continue to work on the remote desktop
-    if (!m_KeyboardCaptureActive) {
-        return;
-    }
 
 
     LiSendKeyboardEvent2(0x8000 | keyCode,
